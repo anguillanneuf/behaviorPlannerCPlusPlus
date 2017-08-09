@@ -9,6 +9,8 @@
 #include <map>
 #include <string>
 #include <iterator>
+#include <algorithm>
+#include "spline.h"
 
 /**
  * Initializes Vehicle
@@ -39,6 +41,65 @@ vector<string> Vehicle::find_possible_next_states(string current_state) {
     } else {
         return {"LCR", "KL"};
     }
+}
+
+double Vehicle::cost_for_action(map<int, vector<vector<int> > > predictions, string action,
+                                int current_lane, int target_lane, int available_lanes, int target_speed) {
+
+    map<int, double> front_gaps;
+
+    for (int l = 0; l < available_lanes; l++) {
+        front_gaps[l] = numeric_limits<double>::max();
+    }
+
+    int s = predictions[-1][0][1];
+
+    for (auto const &entry: predictions) {
+        auto vehicle_id = entry.first;
+        int vl = entry.second[0][0], vs = entry.second[0][1];
+        int gap = vs - s;
+        if (vehicle_id != -1 && gap > 0 && front_gaps[vl] > gap) {
+            front_gaps[vl] = gap;
+        }
+    }
+
+    int diff_lane = current_lane - target_lane;
+
+    if (action == "KL") {
+        double diff_lane_cost = abs(diff_lane);
+        double front_gap_cost = target_speed / front_gaps[current_lane];
+        return diff_lane_cost + 1.5 * front_gap_cost;
+    }
+
+    if (action == "PLCL") {
+        if (diff_lane + 1 > available_lanes) return numeric_limits<double>::max();
+        double diff_lane_cost = abs(diff_lane + 1);
+        double front_gap_cost = target_speed / front_gaps[current_lane + 1];
+        return diff_lane_cost + 1.5 * front_gap_cost;
+    }
+
+    if (action == "PLCR") {
+        if (diff_lane - 1 < 0) return numeric_limits<double>::max();
+        double diff_lane_cost = abs(diff_lane - 1);
+        double front_gap_cost = target_speed / front_gaps[current_lane - 1];
+        return diff_lane_cost + 1.5 * front_gap_cost;
+    }
+
+    if (action == "LCL") {
+        if (diff_lane + 1 > available_lanes) return numeric_limits<double>::max();
+        double diff_lane_cost = abs(diff_lane + 1);
+        double front_gap_cost = target_speed / front_gaps[current_lane + 1];
+        return diff_lane_cost + 1.5 * front_gap_cost;
+    }
+
+    if (action == "LCR") {
+        if (diff_lane - 1 < 0) return numeric_limits<double>::max();
+        double diff_lane_cost = abs(diff_lane - 1);
+        double front_gap_cost = target_speed / front_gaps[current_lane - 1];
+        return diff_lane_cost + 1.5 * front_gap_cost;
+    }
+
+    return numeric_limits<double>::max();
 }
 
 // TODO - Implement this method.
@@ -80,164 +141,23 @@ void Vehicle::update_state(map<int, vector<vector<int> > > predictions) {
 
     vector<string> states = find_possible_next_states(this->state);
 
-    //states = {"KL", "LCL", "LCR", "PLCL", "PLCR"};
     vector<double> costs;
-    double cost;
 
-    cout << "current state: " << this->state << endl;
-    cout << "current lane: " << this->lane << endl;
+    int current_lane = predictions[-1][0][0], target_lane = 0;
 
-    for (string test_state : states) {
+    for (auto const& a: states) {
 
-        cost = 0;
+        double cost;
 
-        // create copy of our vehicle
-        Vehicle test_v = Vehicle(this->lane, this->s, this->v, this->a);
-        test_v.state = test_state;
-        test_v.realize_state(predictions); // update acceleration and lane
+        cost = cost_for_action(predictions, a, current_lane, target_lane, lanes_available, target_speed);
 
-        // predict one step into future, for selected state
-        vector<int> test_v_state = test_v.state_at(1);
-        int pred_lane = test_v_state[0];
-        double pred_s = test_v_state[1];
-        double pred_v = test_v_state[2];
-        double pred_a = test_v_state[3];
-
-        // predict two step into future, for selected state
-        vector<int> test_v_state2 = test_v.state_at(2);
-        int pred_lane2 = test_v_state2[0];
-        double pred_s2 = test_v_state2[1];
-        double pred_v2 = test_v_state2[2];
-        double pred_a2 = test_v_state2[3];
-
-        cout << "tested state: " << test_state << endl;
-        cout << "pred_lane: " << pred_lane << endl;
-
-        /* update cost
-         *
-         *
-
-        // check for collisions
-        map<int, vector<vector<int> > >::iterator it = predictions.begin();
-
-        while (it != predictions.end()) {
-            int index = it->first;
-            vector<vector<int>> v = it->second;
-            // check predictions one step in future as well
-            if ((v[1][0] == pred_lane) && (abs(v[1][1] - pred_s) <= L) && index != -1) {
-                cout << "coll w/ car: " << index << ", "
-                     << v[1][0] << " " << pred_lane << ", "
-                     << v[1][1] << " " << pred_s << endl;
-                cost += 1000;
-            }
-            it++;
-        }
-
-        cost += pow(fabs(10 - pred_v),2);
-        cost += 1 * (3 - pred_lane);
-        cost += 1 * (1 - exp(-abs(pred_lane - 3) / (300 - pred_s)));
-        if (pred_lane < 0 || pred_lane > 3)
-            cost += 1000;
-        */
-
-
-        /* update cost (Python solution)
-         *
-         * */
-
-        // priority levels for costs
-        int COLLISION = 1e6;
-        int DANGER = 1e5;
-        int REACH_GOAL = 1e5;
-        int COMFORT = 1e4;
-        int EFFICIENCY = 1e2;
-        double DESIRED_BUFFER = 1.5;
-
-        int goal_lane = 0;
-        double cost = 0.0;
-
-        if (pred_lane < 0 || pred_lane > 3){
-            cost += 1e18;
-        }
-
-
-        // 1. change lane cost
-        // penalizes lane changes away from goal lane and rewards changes towards goal lane
-        int proposed_lanes = fabs(goal_lane - pred_lane); // how many lanes from goal lane
-        int cur_lanes = test_v.lane;
-        if (proposed_lanes > cur_lanes)
-            cost += COMFORT;
-        if (proposed_lanes < cur_lanes)
-            cost -= COMFORT;
-
-        // 2. distance from goal lane
-        // penalizes lane changes away from goal lane near goal distance
-        double distance = fabs(300 - pred_s);
-        distance = max(distance, 1.0);
-        double time_to_goal = distance / ((pred_v + test_v.v) / 2);
-        double multiplier = (5 * proposed_lanes / time_to_goal);
-        cost += multiplier * REACH_GOAL;
-
-        // 3. inefficiency cost
-        double avg_speed = (pred_v + test_v.v)/2;
-        double target_speed = 10.0;
-        double diff = target_speed - avg_speed;
-        double pct = diff / target_speed;
-        multiplier = pow(pct, 2);
-        cost += multiplier * EFFICIENCY;
-
-        // 4. collision cost
-        map<int, vector<vector<int> > >::iterator car = predictions.begin();
-
-        while (car != predictions.end()) {
-
-            int car_id = car->first;
-
-            vector<vector<int>> car_values = car->second;
-
-            // check predictions one step in future as well
-            if ((car_values[1][0] == pred_lane) && // car in pred_lane
-                (abs(car_values[1][1] - pred_s) <= L) && // car s and pred_s are very close
-                (car_id != -1)) // there are cars?
-            {
-                cout << "coll w/ car: " << car_id << ", "
-                     << car_values[1][0] << " " << pred_lane << ", "
-                     << car_values[1][1] << " " << pred_s << endl;
-                cost += COLLISION;
-            }
-            car ++;
-        }
-
-        // 5. buffer_cost
-        double closest_approach = 1e6-1;
-        car = predictions.begin();
-
-        while (car != predictions.end()) {
-            vector<vector<int>> car_values = car->second;
-
-            // if car in pred_lane
-            if (car_values[1][0] == pred_lane) {
-
-                double dist = fabs(car_values[1][1] - test_v.s);
-                if (dist < closest_approach)
-                    closest_approach = dist;
-            }
-            car ++;
-        }
-
-        if (closest_approach == 0)
-            cost += 10 * DANGER;
-
-        double timesteps_away = closest_approach / avg_speed;
-        if (timesteps_away > DESIRED_BUFFER)
-            cost += 0.0;
-
-        multiplier = 1.0 - pow((timesteps_away / DESIRED_BUFFER),2);
-        cost += multiplier * DANGER;
-
-
-        cout << "cost: " << cost << endl;
         costs.push_back(cost);
+
+        cout << "current state: " << this->state << endl;
+        cout << "current lane: " << this->lane << endl;
+        cout << "tested state: " << a << endl;
+        cout << "target lane: " << target_lane << endl;
+        cout << "cost: " << cost << endl;
     }
 
     double min_cost = 99999;
