@@ -91,6 +91,13 @@ public:
 
     vector<vector<int> > generate_predictions(int horizon);
 
+    double cost_for_action(map<int, vector<vector<int> > > predictions,
+                          string action,
+                          int current_lane,
+                          int target_lane,
+                          int available_lanes,
+                          int target_speed);
+
 };
 
 

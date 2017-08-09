@@ -10,7 +10,7 @@
 #include <string>
 #include <iterator>
 #include <algorithm>
-#include "spline.h"
+//#include "spline.h"
 
 /**
  * Initializes Vehicle
